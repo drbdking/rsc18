@@ -22,7 +22,7 @@ def create_similar_sample( playlists, actions, challenge_set, target, reduce=1 )
     print( 'create similar sample' )
     tstart = time.time()
     
-    #only lists with support > 2
+    # only lists with support > 2, playlist with more than 2 tracks
     actions['sup'] = actions.groupby( 'track_id' )['track_id'].transform( 'size' )
     good = actions.groupby('playlist_id')['sup'].min()
     good = good[good > 2]
@@ -266,7 +266,7 @@ def check_sample(  ):
     pass
 
 def create_random_training_sample( playlists, artists, tracks, actions, target, reduce=0.1 ):
-    
+    # why not join then sample?
     playlists = playlists.sample( math.floor( len( playlists )*reduce ) )
     actions = actions[ np.in1d( actions.playlist_id, playlists.playlist_id ) ]
     artists = artists[ np.in1d( artists.artist_id, actions.artist_id.unique() ) ]
