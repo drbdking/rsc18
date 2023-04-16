@@ -79,6 +79,7 @@ def main():
             pid, name, ntracks, nsamples = row
             num_hidden = ntracks - nsamples
             
+            # get tracks for the current playlist
             if pid in plidmap:
                 sidx = plidmap[pid]
                 s = start[sidx]

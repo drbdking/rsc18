@@ -80,7 +80,9 @@ class SessionKNN:
         
     def train( self, data, test=None ):
         '''
-        Trains the predictor.
+        Training process. Use existing item-session map and session-item map or build from scratch. 
+        Both dict or dict-like, item-session map key: item, value: {sessions involving item},
+        session-item map key: session, value: {items in the session}. Calculate pop, IDF, title_boost.
         
         Parameters
         --------
@@ -95,12 +97,13 @@ class SessionKNN:
         
         folder = self.folder
         
+        # use existing maps
         if folder is not None and os.path.isfile( folder + 'session_item_map.pkl' ):
             self.session_item_map = pickle.load( open( folder + 'session_item_map.pkl', 'rb') )
             self.session_time = pickle.load( open( folder + 'session_time.pkl', 'rb' ) )
             self.item_session_map = pickle.load( open( folder + 'item_session_map.pkl', 'rb' ) )
-        else: 
-            
+        # build maps
+        else:
             index_session = train.columns.get_loc( self.session_key )
             index_item = train.columns.get_loc( self.item_key )
             #index_time = train.columns.get_loc( self.time_key )
@@ -114,20 +117,24 @@ class SessionKNN:
             
             timemap = pd.Series( index=playlists.playlist_id, data=playlists.modified_at )
             
+            # Assumption? data ordered by session id
             for row in train.itertuples(index=False):
-                # cache items of sessions
+                # if current session != last session, cache items of sessions
                 if row[index_session] != session:
                     if len(session_items) > 0:
                         self.session_item_map.update({session : session_items})
                         # cache the last time stamp of the session
                         self.session_time.update({session : timestamp})
+                    # start to cache items for a new session
                     session = row[index_session]
                     session_items = set()
+                # add current item
                 timestamp = timemap[row[index_session]]
                 session_items.add(row[index_item])
                 
                 # cache sessions involving an item
                 map_is = self.item_session_map.get( row[index_item] )
+                # adding new item
                 if map_is is None:
                     map_is = set()
                     self.item_session_map.update({row[index_item] : map_is})
@@ -148,26 +155,32 @@ class SessionKNN:
                 pickle.dump( self.item_session_map, open( folder + 'item_session_map.pkl', 'wb' ) )
         
         self.item_pop = pd.DataFrame()
+        # num of sessions involving item
         self.item_pop['pop'] = train.groupby( self.item_key ).size()
         #self.item_pop['pop'] = self.item_pop['pop'] / self.item_pop['pop'].max()
+        # percentage
         self.item_pop['pop'] = self.item_pop['pop'] / len( train )
         self.item_pop = self.item_pop['pop'].to_dict()
         
+        # IDF
         if self.idf_weight != None:
             self.idf = pd.DataFrame()
             self.idf['idf'] = train.groupby( self.item_key ).size()
             self.idf['idf'] = np.log( train[self.session_key].nunique() / self.idf['idf'] )
             self.idf = self.idf['idf'].to_dict()
         
+        # ?
         if self.title_boost > 0:
             self.stemmer = stem.PorterStemmer()
             playlists['name'] = playlists['name'].apply(lambda x: self.normalise(str(x), True, True ))
             playlists['name_id'] = playlists['name'].astype( 'category' ).cat.codes
+            # is this efficient?
             self.namemap = playlists.groupby('name').name_id.min()
             self.namemap = pd.Series( index=self.namemap.index, data=self.namemap.values )
             self.plnamemap = pd.Series( index=playlists['playlist_id'].values, data=playlists['name_id'].values )
             
         self.artist_map = pd.DataFrame()
+        # is this efficient?
         self.artist_map['artist_id'] = train.groupby( self.item_key ).artist_id.min()
         self.artist_map = self.artist_map['artist_id'].to_dict()
                 
@@ -400,7 +413,7 @@ class SessionKNN:
         --------
         out : set           
         '''
-        return self.session_item_map.get(session);
+        return self.session_item_map.get(session)
     
     
     def sessions_for_item(self, item_id):
@@ -594,8 +607,10 @@ class SessionKNN:
                 
                 if not self.remind and item in iset:
                     continue
-                
+
+                # caching previous result for addition
                 old_score = scores.get( item )
+                # similarity
                 new_score = session[1]
                 
                 if old_score is None:
@@ -625,7 +640,7 @@ class SessionKNN:
         return 1
     
     def div(self, i):
-        return 1/i
+        return 1/i  
     
     def log(self, i):
         return 1/(log10(i+1.7))
