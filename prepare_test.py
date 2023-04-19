@@ -1,6 +1,5 @@
 '''
 Created on 09.04.2018
-
 @author: Iman
 '''
 
@@ -68,15 +67,16 @@ if __name__ == '__main__':
         for track in playlist_tracks:
             
             artist_uri = track['artist_uri']
-            artist_id  = artistmap.ix[artist_uri].artist_id
-            
             track_uri = track['track_uri']
-            track_id  = trackmap.ix[track_uri].track_id
+            # skip new track in test file
+            if artist_uri in artistmap.index and track_uri in trackmap.index:
+                artist_id  = artistmap.loc[artist_uri].artist_id
+                track_id  = trackmap.loc[track_uri].track_id
         
-            playlists_tracks['playlist_id'].append( playlist_id )
-            playlists_tracks['track_id'].append( track_id )
-            playlists_tracks['artist_id'].append( artist_id )
-            playlists_tracks['pos'].append( track['pos'] )
+                playlists_tracks['playlist_id'].append( playlist_id )
+                playlists_tracks['track_id'].append( track_id )
+                playlists_tracks['artist_id'].append( artist_id )
+                playlists_tracks['pos'].append( track['pos'] )
             
     df_playlists = pd.DataFrame.from_dict(playlists)
     df_playlists_tracks = pd.DataFrame.from_dict(playlists_tracks)
@@ -84,4 +84,3 @@ if __name__ == '__main__':
     print('saving files...')
     df_playlists.to_csv( TARGET_FOLDER + PLAYLISTS_FILE, index=False)
     df_playlists_tracks.to_csv( TARGET_FOLDER + PLAYLISTS_TRACKS_FILE, index=False)
-        
