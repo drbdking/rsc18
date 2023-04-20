@@ -68,10 +68,10 @@ if __name__ == '__main__':
         for track in playlist_tracks:
             
             artist_uri = track['artist_uri']
-            artist_id  = artistmap.ix[artist_uri].artist_id
+            artist_id  = artistmap.loc[artist_uri].artist_id
             
             track_uri = track['track_uri']
-            track_id  = trackmap.ix[track_uri].track_id
+            track_id  = trackmap.loc[track_uri].track_id
         
             playlists_tracks['playlist_id'].append( playlist_id )
             playlists_tracks['track_id'].append( track_id )

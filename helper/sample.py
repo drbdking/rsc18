@@ -55,7 +55,7 @@ def create_similar_sample( playlists, actions, challenge_set, target, reduce=1 )
             end = start + math.floor( 1000*reduce )
             index += list(range(start,end))
     
-        cpls = cpls.ix[index]
+        cpls = cpls.loc[index]
    
     i = 0
     for list_example in cpls.itertuples():
@@ -83,7 +83,7 @@ def create_similar_sample( playlists, actions, challenge_set, target, reduce=1 )
                 else: #first tracks
                     tactions = lactions.head( list_example.num_samples )
                 
-                if len( tactions ) is 0:
+                if len( tactions ) == 0:
                     print( 'no actions received...' )
                     print( pid )
                     print( list_example.num_samples )
@@ -99,7 +99,7 @@ def create_similar_sample( playlists, actions, challenge_set, target, reduce=1 )
             playlist_set.add(pid)
             
             #print( list_example.name )
-            if list_example.name is not None and list_example.name != '' and list_example.name != 'nan' and not type(list_example.name) is float:
+            if list_example.name and list_example.name != '' and list_example.name != 'nan' and not type(list_example.name) == float:
                 sample['name'].append( slist.name.values[0] )
                 #print( 'added' )
             else:
@@ -179,7 +179,7 @@ def create_random_sample( playlists, actions, challenge_set, target, reduce=1 ):
             end = start + math.floor( 1000*reduce )
             index += list(range(start,end))
     
-        cpls = cpls.ix[index]
+        cpls = cpls.loc[index]
    
     i = 0
     for list_example in cpls.itertuples():
@@ -207,7 +207,7 @@ def create_random_sample( playlists, actions, challenge_set, target, reduce=1 ):
                 else: #first tracks
                     tactions = lactions.head( list_example.num_samples )
                 
-                if len( tactions ) is 0:
+                if len( tactions ) == 0:
                     print( 'no actions received...' )
                     print( pid )
                     print( list_example.num_samples )
@@ -222,7 +222,7 @@ def create_random_sample( playlists, actions, challenge_set, target, reduce=1 ):
             sample['playlist_id'].append( pid )
             playlist_set.add(pid)
             
-            if list_example.name is not None and list_example.name != '' and list_example.name != 'nan':
+            if list_example.name and list_example.name != '' and list_example.name != 'nan':
                 sample['name'].append( slist.name.values[0] )
             else:
                 sample['name'].append( None )

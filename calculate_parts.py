@@ -37,14 +37,14 @@ def main():
     
     mp = MostPopular()
     
-    algs['diskknn'] = Fill( KNNDisk( 1000, tf_method='ratio-s50', idf_method='log10', similarity='cosine', sim_denom_add=0, folder=FOLDER_TEST ), mp )
-    algs['sknn'] = Fill( SessionKNN( 2000, 0, idf_weight=1, folder=FOLDER_TEST ), mp )
+    # algs['diskknn'] = Fill( KNNDisk( 1000, tf_method='ratio-s50', idf_method='log10', similarity='cosine', sim_denom_add=0, folder=FOLDER_TEST ), mp )
+    # algs['sknn'] = Fill( SessionKNN( 2000, 0, idf_weight=1, folder=FOLDER_TEST ), mp )
     algs['iknn'] = Fill( ItemKNN( 100, alpha=0.75, idf_weight=1, folder=FOLDER_TEST ), mp )
-    algs['implicit'] = Fill( ColdImplicit( 300, epochs=10, reg=0.08, idf_weight=1, algo='als' ), mp )
+    # algs['implicit'] = Fill( ColdImplicit( 300, epochs=10, reg=0.08, idf_weight=1, algo='als' ), mp )
     #algs['implicit'] = Fill( Implicit( 300, epochs=10, reg=0.08, algo='als' ), mp )
 
-    algs['smatch'] = Fill( StringMatching(), mp )
-    algs['imatch'] = Fill( ImplicitStringMatch( 128, add_artists=True ), mp )
+    # algs['smatch'] = Fill( StringMatching(), mp )
+    # algs['imatch'] = Fill( ImplicitStringMatch( 128, add_artists=True ), mp )
     
     #start processing
     
