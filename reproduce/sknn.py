@@ -97,6 +97,7 @@ class SessionKNN:
         
         folder = self.folder
         
+        start = time.time()
         # use existing maps
         if folder is not None and os.path.isfile( folder + 'session_item_map.pkl' ):
             self.session_item_map = pickle.load( open( folder + 'session_item_map.pkl', 'rb') )
@@ -153,7 +154,9 @@ class SessionKNN:
                 pickle.dump( self.session_item_map,  open( folder + 'session_item_map.pkl', 'wb' ) )
                 pickle.dump( self.session_time, open( folder + 'session_time.pkl', 'wb' ) )
                 pickle.dump( self.item_session_map, open( folder + 'item_session_map.pkl', 'wb' ) )
-        
+        end = time.time()
+        print('Mapping build time: ', end - start)
+
         self.item_pop = pd.DataFrame()
         # num of sessions involving item
         self.item_pop['pop'] = train.groupby( self.item_key ).size()
@@ -162,12 +165,16 @@ class SessionKNN:
         self.item_pop['pop'] = self.item_pop['pop'] / len( train )
         self.item_pop = self.item_pop['pop'].to_dict()
         
+        start = time.time()
         # IDF
         if self.idf_weight != None:
             self.idf = pd.DataFrame()
             self.idf['idf'] = train.groupby( self.item_key ).size()
             self.idf['idf'] = np.log( train[self.session_key].nunique() / self.idf['idf'] )
             self.idf = self.idf['idf'].to_dict()
+        end  = time.time()
+        print('IDF calculate time: ', end - start)
+        
         
         # ?
         if self.title_boost > 0:
@@ -226,11 +233,19 @@ class SessionKNN:
             return res
                 
         iset = set(items)
+        start = time.time()
         neighbors = self.find_neighbors( iset, plname )
+        end = time.time()
+        print('Find neighbor time: ', end - start)
         self.tneighbors += (time.time() - tstart)
         
         tstart = time.time()
+        start = time.time()
         scores, simsum, count = self.score_items( neighbors, items, iset )
+        print(scores[17])
+        print(simsum)
+        end = time.time()
+        print('Score items time: ', end - start)
         self.tscore += (time.time() - tstart)
         
         #push popular ones
@@ -570,7 +585,7 @@ class SessionKNN:
         
         possible_neighbors = sorted( possible_neighbors, reverse=True, key=lambda x: x[1] )
         possible_neighbors = possible_neighbors[:self.k]
-        
+
         return possible_neighbors
     
             
@@ -605,8 +620,8 @@ class SessionKNN:
             
             for item in items:
                 
-                if not self.remind and item in iset:
-                    continue
+                # if not self.remind and item in iset:
+                #     continue
 
                 # caching previous result for addition
                 old_score = scores.get( item )
