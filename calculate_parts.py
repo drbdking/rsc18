@@ -54,7 +54,10 @@ def main():
     results_time = {}
     
     for k, v in algs.items():
-        
+        # print(11111111111111111111)
+        # print(train['actions'])
+        # print(train['playlists'])
+        # break
         tstart = time.time()
         v.train( train, test=test )
         print( 'trained {} in {}s'.format( k, (time.time() - tstart) ) )

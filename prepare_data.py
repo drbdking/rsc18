@@ -77,11 +77,24 @@ if __name__ == '__main__':
         if filenames[i].startswith("mpd.slice.") and filenames[i].endswith(".json"):
             fp = os.sep.join((SRC_FOLDER, filenames[i]))
             josn_str = json.load(open(fp))
+            # if i == 0:
+            # #     print(len(filenames))
+            # #     print(type(josn_str['info']))
+            #     print(len(josn_str['playlists'][0]['tracks']))
+            #     for ii in josn_str:
+            #         print(ii)
+            #     break
+
+
+            # list of playlist in the current json
             playlists_str = josn_str['playlists']
             
             # load json file in a dataframe
             df_file_playlists = pd.DataFrame.from_dict(playlists_str)
-            
+            if not i:
+                print(df_file_playlists)
+                # print(df_file_playlists['tracks'])
+                break
             #iterate over playlists
             for index, row in df_file_playlists.iterrows():
                 
