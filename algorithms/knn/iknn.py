@@ -140,7 +140,7 @@ class ItemKNN:
 
                 cnt += 1
 
-                if cnt % 1000 == 0:
+            if cnt % 1000 == 0:
                     print(' -- finished {} of {} items in {}s'.format(cnt, len(test_items), (time.time() - tstart)))
 
             if folder is not None:
