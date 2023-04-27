@@ -97,62 +97,63 @@ class SessionKNN:
         
         folder = self.folder
         
-        # use existing maps
-        if folder is not None and os.path.isfile( folder + 'session_item_map.pkl' ):
-            self.session_item_map = pickle.load( open( folder + 'session_item_map.pkl', 'rb') )
-            self.session_time = pickle.load( open( folder + 'session_time.pkl', 'rb' ) )
-            self.item_session_map = pickle.load( open( folder + 'item_session_map.pkl', 'rb' ) )
-        # build maps
-        else:
-            index_session = train.columns.get_loc( self.session_key )
-            index_item = train.columns.get_loc( self.item_key )
-            #index_time = train.columns.get_loc( self.time_key )
-            
-            session = -1
-            session_items = set()
-            timestamp = -1
-            
-            cnt = 0
-            tstart = time.time()
-            
-            timemap = pd.Series( index=playlists.playlist_id, data=playlists.modified_at )
-            
-            # Assumption? data ordered by session id
-            for row in train.itertuples(index=False):
-                # if current session != last session, cache items of sessions
-                if row[index_session] != session:
-                    if len(session_items) > 0:
-                        self.session_item_map.update({session : session_items})
-                        # cache the last time stamp of the session
-                        self.session_time.update({session : timestamp})
-                    # start to cache items for a new session
-                    session = row[index_session]
-                    session_items = set()
-                # add current item
-                timestamp = timemap[row[index_session]]
-                session_items.add(row[index_item])
-                
-                # cache sessions involving an item
-                map_is = self.item_session_map.get( row[index_item] )
-                # adding new item
-                if map_is is None:
-                    map_is = set()
-                    self.item_session_map.update({row[index_item] : map_is})
-                map_is.add(row[index_session])
-                
-                cnt += 1
-                
-                if cnt % 100000 == 0:
-                    print( ' -- finished {} of {} rows in {}s'.format( cnt, len(train), (time.time() - tstart) ) )
-                
+        # # use existing maps
+        # if folder is not None and os.path.isfile( folder + 'session_item_map.pkl' ):
+        #     self.session_item_map = pickle.load( open( folder + 'session_item_map.pkl', 'rb') )
+        #     self.session_time = pickle.load( open( folder + 'session_time.pkl', 'rb' ) )
+        #     self.item_session_map = pickle.load( open( folder + 'item_session_map.pkl', 'rb' ) )
+        # # build maps
+        # else:
+        
+        index_session = train.columns.get_loc( self.session_key )
+        index_item = train.columns.get_loc( self.item_key )
+        #index_time = train.columns.get_loc( self.time_key )
+
+        session = -1
+        session_items = set()
+        timestamp = -1
+
+        cnt = 0
+        tstart = time.time()
+
+        timemap = pd.Series( index=playlists.playlist_id, data=playlists.modified_at )
+
+        # Assumption? data ordered by session id
+        for row in train.itertuples(index=False):
+            # if current session != last session, cache items of sessions
+            if row[index_session] != session:
+                if len(session_items) > 0:
+                    self.session_item_map.update({session : session_items})
+                    # cache the last time stamp of the session
+                    self.session_time.update({session : timestamp})
+                # start to cache items for a new session
+                session = row[index_session]
+                session_items = set()
+            # add current item
+            timestamp = timemap[row[index_session]]
+            session_items.add(row[index_item])
+
+            # cache sessions involving an item
+            map_is = self.item_session_map.get( row[index_item] )
+            # adding new item
+            if map_is is None:
+                map_is = set()
+                self.item_session_map.update({row[index_item] : map_is})
+            map_is.add(row[index_session])
+
+            cnt += 1
+
+            if cnt % 100000 == 0:
+                print( ' -- finished {} of {} rows in {}s'.format( cnt, len(train), (time.time() - tstart) ) )
+
             # Add the last tuple    
             self.session_item_map.update({session : session_items})
             self.session_time.update({session : timestamp})
             
-            if folder is not None:
-                pickle.dump( self.session_item_map,  open( folder + 'session_item_map.pkl', 'wb' ) )
-                pickle.dump( self.session_time, open( folder + 'session_time.pkl', 'wb' ) )
-                pickle.dump( self.item_session_map, open( folder + 'item_session_map.pkl', 'wb' ) )
+            # if folder is not None:
+            #     pickle.dump( self.session_item_map,  open( folder + 'session_item_map.pkl', 'wb' ) )
+            #     pickle.dump( self.session_time, open( folder + 'session_time.pkl', 'wb' ) )
+            #     pickle.dump( self.item_session_map, open( folder + 'item_session_map.pkl', 'wb' ) )
         
         self.item_pop = pd.DataFrame()
         # num of sessions involving item

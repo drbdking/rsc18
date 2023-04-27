@@ -6,13 +6,65 @@ import os
 import pickle
 import random
 import time
+
 import psutil
+
 from nltk import tokenize as tokenise, stem
 import numpy as np
 import pandas as pd
-import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import Pool
+
+def build_maps(data, session_key, item_key, timemap):
+    session_item_map = {}
+    session_time = {}
+    item_session_map = {}
+
+    index_session = data.columns.get_loc(session_key)
+    index_item = data.columns.get_loc(item_key)
+
+    session = -1
+    session_items = set()
+    timestamp = -1
+
+    for row in data.itertuples(index=False):
+        if row[index_session] != session:
+            if len(session_items) > 0:
+                session_item_map.update({session: session_items})
+                session_time.update({session: timestamp})
+            session = row[index_session]
+            session_items = set()
+        
+        timestamp = timemap[row[index_session]]
+        session_items.add(row[index_item])
+
+        map_is = item_session_map.get(row[index_item])
+        if map_is is None:
+            map_is = set()
+            item_session_map.update({row[index_item]: map_is})
+        map_is.add(row[index_session])
+
+    session_item_map.update({session: session_items})
+    session_time.update({session: timestamp})
+
+    return session_item_map, session_time, item_session_map
+
+def parallel_build_maps_pool(train, session_key, item_key, timemap, n_workers):
+    chunk_size = math.ceil(len(train) / n_workers)
+    data_chunks = [train[i:i + chunk_size] for i in range(0, len(train), chunk_size)]
+
+    with Pool(n_workers) as pool:
+        results = pool.starmap(build_maps, [(chunk, session_key, item_key, timemap) for chunk in data_chunks])
+
+    session_item_map = {}
+    session_time = {}
+    item_session_map = {}
+
+    for r in results:
+        session_item_map.update(r[0])
+        session_time.update(r[1])
+        item_session_map.update(r[2])
+
+    return session_item_map, session_time, item_session_map
 
 class SessionKNN: 
     '''
@@ -78,31 +130,6 @@ class SessionKNN:
         
         self.sim_time = 0
         
-    def _process_chunk(self, chunk, timemap):
-        session_item_map = {}
-        item_session_map = {}
-        session_time = {}
-
-        for row in chunk.itertuples(index=False):
-            session = row[0]
-            timestamp = timemap[session]
-            item = row[1]
-
-            # update session_item_map
-            session_items = session_item_map.get(session, set())
-            session_items.add(item)
-            session_item_map[session] = session_items
-
-            # update item_session_map
-            map_is = item_session_map.get(item, set())
-            map_is.add(session)
-            item_session_map[item] = map_is
-
-            # update session_time
-            session_time[session] = timestamp
-
-        return session_item_map, item_session_map, session_time
-        
     def train( self, data, test=None ):
         '''
         Training process. Use existing item-session map and session-item map or build from scratch. 
@@ -116,45 +143,34 @@ class SessionKNN:
             It must have a header. Column names are arbitrary, but must correspond to the ones you set during the initialization of the network (session_key, item_key, time_key properties).
             
         '''
+        
         train = data['actions']
         playlists = data['playlists']
-
+        
         folder = self.folder
-
-        index_session = train.columns.get_loc(self.session_key)
-        index_item = train.columns.get_loc(self.item_key)
-
+        
+        # Define timemap
         timemap = pd.Series(index=playlists.playlist_id, data=playlists.modified_at)
         
-        # use existing maps
-        if folder is not None and os.path.isfile( folder + 'session_item_map.pkl' ):
-            self.session_item_map = pickle.load( open( folder + 'session_item_map.pkl', 'rb') )
-            self.session_time = pickle.load( open( folder + 'session_time.pkl', 'rb' ) )
-            self.item_session_map = pickle.load( open( folder + 'item_session_map.pkl', 'rb' ) )
+        # # use existing maps
+        # if folder is not None and os.path.isfile( folder + 'session_item_map.pkl' ):
+        #     self.session_item_map = pickle.load( open( folder + 'session_item_map.pkl', 'rb') )
+        #     self.session_time = pickle.load( open( folder + 'session_time.pkl', 'rb' ) )
+        #     self.item_session_map = pickle.load( open( folder + 'item_session_map.pkl', 'rb' ) )
         # build maps
-        else:
-            num_processes = os.cpu_count()  # number of processes to use for parallelism
-            chunk_size = len(train) // num_processes  # size of the data chunk for each process
+        # else:
+        n_workers = min(os.cpu_count(), 4)  # Change 4 to the desired number of workers
+        self.session_item_map, self.session_time, self.item_session_map = parallel_build_maps_pool(train, 
+                                                                                              self.session_key, 
+                                                                                              self.item_key, 
+                                                                                              timemap, 
+                                                                                              n_workers)
 
-            # Split the dataset into chunks
-            chunks = [train[i:i + chunk_size] for i in range(0, len(train), chunk_size)]
+        # if folder is not None:
+        #     pickle.dump( self.session_item_map,  open( folder + 'session_item_map.pkl', 'wb' ) )
+        #     pickle.dump( self.session_time, open( folder + 'session_time.pkl', 'wb' ) )
+        #     pickle.dump( self.item_session_map, open( folder + 'item_session_map.pkl', 'wb' ) )
 
-            with ProcessPoolExecutor(max_workers=num_processes) as executor:
-                results = executor.map(self._process_chunk, chunks, [timemap] * num_processes)
-
-            # Combine the results from different processes
-            for res in results:
-                session_item_map, item_session_map, session_time = res
-
-                self.session_item_map.update(session_item_map)
-                self.item_session_map.update(item_session_map)
-                self.session_time.update(session_time)
-
-            if folder is not None:
-                pickle.dump(self.session_item_map, open(folder + 'session_item_map.pkl', 'wb'))
-                pickle.dump(self.session_time, open(folder + 'session_time.pkl', 'wb'))
-                pickle.dump(self.item_session_map, open(folder + 'item_session_map.pkl', 'wb'))
-        
         self.item_pop = pd.DataFrame()
         # num of sessions involving item
         self.item_pop['pop'] = train.groupby( self.item_key ).size()
@@ -194,6 +210,17 @@ class SessionKNN:
         self.tnorm = 0
         self.thead = 0
         self.count = 0
+        
+    def process_row(self, row):
+        index_session = self.session_key
+        index_item = self.item_key
+
+        new_session = False
+        if row[index_session] != self.session:
+            new_session = True
+        item = row[index_item]
+
+        return {'new_session': new_session, 'session': row[index_session], 'item': item}
                 
     def predict( self, plname, tracks, playlist_id=None, artists=None, num_hidden=None ):
         '''
@@ -338,16 +365,9 @@ class SessionKNN:
         --------
         out : float value           
         '''
-        
-        first_set = set(first)
-        second_set = set(second)
-        li = len(first_set & second_set)
-        la = len(first_set)
-        lb = len(second_set)
-    
-#         li = len(first&second)
-#         la = len(first)
-#         lb = len(second)
+        li = len(first&second)
+        la = len(first)
+        lb = len(second)
         result = li / ( sqrt(la) * sqrt(lb) )
 
         return result
