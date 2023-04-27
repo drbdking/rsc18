@@ -143,8 +143,8 @@ class SessionKNN:
                 
                 cnt += 1
                 
-                if cnt % 100000 == 0:
-                    print( ' -- finished {} of {} rows in {}s'.format( cnt, len(train), (time.time() - tstart) ) )
+                # if cnt % 100000 == 0:
+                #     print( ' -- finished {} of {} rows in {}s'.format( cnt, len(train), (time.time() - tstart) ) )
                 
             # Add the last tuple    
             self.session_item_map.update({session : session_items})
@@ -236,16 +236,16 @@ class SessionKNN:
         start = time.time()
         neighbors = self.find_neighbors( iset, plname )
         end = time.time()
-        print('Find neighbor time: ', end - start)
+        n_time = end - start
+        # print('Find neighbor time: ', n_time)
         self.tneighbors += (time.time() - tstart)
         
         tstart = time.time()
         start = time.time()
         scores, simsum, count = self.score_items( neighbors, items, iset )
-        print(scores[17])
-        print(simsum)
         end = time.time()
-        print('Score items time: ', end - start)
+        s_time = end - start
+        # print('Score items time: ', s_time)
         self.tscore += (time.time() - tstart)
         
         #push popular ones
@@ -293,8 +293,8 @@ class SessionKNN:
         self.tformat += (time.time() - tstart)
              
         tstart = time.time()
-        if self.normalize:
-            res['confidence'] = res['confidence'] / simsum
+        # if self.normalize:
+        #     res['confidence'] = res['confidence'] / simsum
             #res['confidence'] = ( res['confidence']  - res['confidence'].min() )/ ( res['confidence'].max() - res['confidence'].min() )
         self.tnorm += (time.time() - tstart)
         
@@ -314,7 +314,7 @@ class SessionKNN:
         #rlist = [ (self.tall / self.count), (self.tneighbors / self.count), (self.tscore / self.count), (self.tartist / self.count), (self.tsort / self.count), (self.tnorm / self.count) ]
         #print( ','.join( map( str, rlist ) ) )
                 
-        return res
+        return res, n_time, s_time
 
 
     def jaccard(self, first, second):
@@ -628,12 +628,22 @@ class SessionKNN:
                 # similarity
                 new_score = session[1]
                 
+                # if old_score is None:
+                #     new_score = new_score if not self.idf_weight else new_score + ( new_score * self.idf[item] * self.idf_weight )
+                #     new_score = new_score if not self.pop_weight else new_score / self.item_pop[item]
+                #     new_score = new_score if self.seq_weighting is None else new_score * decay
+                # else: 
+                #     new_score = new_score if not self.idf_weight else new_score + ( new_score * self.idf[item] * self.idf_weight )
+                #     new_score = new_score if not self.pop_weight else new_score / self.item_pop[item]
+                #     new_score = new_score if self.seq_weighting is None else new_score * decay
+                #     new_score = old_score + new_score
+
                 if old_score is None:
-                    new_score = new_score if not self.idf_weight else new_score + ( new_score * self.idf[item] * self.idf_weight )
+                    new_score = new_score if not self.idf_weight else new_score * self.idf[item] * self.idf_weight
                     new_score = new_score if not self.pop_weight else new_score / self.item_pop[item]
                     new_score = new_score if self.seq_weighting is None else new_score * decay
                 else: 
-                    new_score = new_score if not self.idf_weight else new_score + ( new_score * self.idf[item] * self.idf_weight )
+                    new_score = new_score if not self.idf_weight else new_score * self.idf[item] * self.idf_weight
                     new_score = new_score if not self.pop_weight else new_score / self.item_pop[item]
                     new_score = new_score if self.seq_weighting is None else new_score * decay
                     new_score = old_score + new_score

@@ -170,7 +170,7 @@ class SessionKNN:
         start = time.time()
         neighbors, similarity = self.find_neighbors(tracks)
         end = time.time()
-        print('Find neighbor time: ', end - start) 
+        n_time = end - start
         
 
         start = time.time()
@@ -178,11 +178,11 @@ class SessionKNN:
         sim_sum = np.sum(similarity)
 
         end = time.time()
-        print('Score items time: ', end - start)
+        s_time = end - start
 
         # Create things in the format
-        if self.normalize:
-            scores = scores / sim_sum
+        # if self.normalize:
+        #     scores = scores / sim_sum
 
         res_dict = {'track_id': candidates, 'confidence': scores}
         res = pd.DataFrame.from_dict(res_dict)       
@@ -194,7 +194,7 @@ class SessionKNN:
                 
         self.count += 1
                 
-        return res
+        return res, n_time, s_time
 
 
     def jaccard(self, first, second):
