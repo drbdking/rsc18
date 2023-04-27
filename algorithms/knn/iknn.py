@@ -12,7 +12,25 @@ import pickle
 import os
 import time
 from math import log10
+from numba import jit
 
+# Add this Numba optimized function
+@jit(nopython=True)
+def calculate_iarray(item_offsets, index_by_items, data_SessionIdx_values, data_ItemIdx_values, session_offsets, index_by_sessions, n_items, i, itemids, test_items):
+    iarray = np.zeros(n_items)
+    if itemids[i] not in test_items:
+        return iarray
+
+    start = item_offsets[i]
+    end = item_offsets[i + 1]
+    for e in index_by_items[start:end]:
+        uidx = data_SessionIdx_values[e]
+        ustart = session_offsets[uidx]
+        uend = session_offsets[uidx + 1]
+        user_events = index_by_sessions[ustart:uend]
+        iarray[data_ItemIdx_values[user_events]] += 1
+
+    return iarray
 
 class ItemKNN:
     '''
@@ -42,7 +60,7 @@ class ItemKNN:
     
     '''    
     
-    def __init__(self, n_sims = 1500, lmbd = 20, alpha = 0.5, steps=100, remind=False, weighting='same', idf_weight=None, pop_weight=None, session_key = 'playlist_id', item_key = 'track_id', time_key = 'pos', folder=None, return_num_preds=500 ):
+    def __init__(self, n_sims = 100, lmbd = 20, alpha = 0.5, steps=100, remind=False, weighting='same', idf_weight=None, pop_weight=None, session_key = 'playlist_id', item_key = 'track_id', time_key = 'pos', folder=None, return_num_preds=500 ):
 
         self.n_sims = n_sims
         self.lmbd = lmbd
@@ -105,32 +123,26 @@ class ItemKNN:
             cnt = 0
             tstart = time.time()
             
+
+
             for i in range(n_items):
-                
-                if itemids[i] not in test_items:
-                    continue
-                
-                iarray = np.zeros(n_items)
-                start = item_offsets[i]
-                end = item_offsets[i+1]
-                for e in index_by_items[start:end]:
-                    uidx = data.SessionIdx.values[e]
-                    ustart = session_offsets[uidx]
-                    uend = session_offsets[uidx+1]
-                    user_events = index_by_sessions[ustart:uend]
-                    iarray[data.ItemIdx.values[user_events]] += 1
+
+            # Replaced the loop with the Numba optimized function
+                iarray = calculate_iarray(item_offsets, index_by_items, data.SessionIdx.values, data.ItemIdx.values,
+                                        session_offsets, index_by_sessions, n_items, i, itemids, test_items)
+
                 iarray[i] = 0
                 norm = np.power((supp[i] + self.lmbd), self.alpha) * np.power((supp.values + self.lmbd), (1.0 - self.alpha))
                 norm[norm == 0] = 1
                 iarray = iarray / norm
-                indices = np.argsort(iarray)[-1:-1-self.n_sims:-1]
+                indices = np.argsort(iarray)[-1:-1 - self.n_sims:-1]
                 self.sims[itemids[i]] = pd.Series(data=iarray[indices], index=itemids[indices])
-                
+
                 cnt += 1
-                
+
                 if cnt % 1000 == 0:
-                    print( ' -- finished {} of {} items in {}s'.format( cnt, len(test_items), (time.time() - tstart) ) )
-                
+                    print(' -- finished {} of {} items in {}s'.format(cnt, len(test_items), (time.time() - tstart)))
+
             if folder is not None:
                 pickle.dump( self.sims, open( name, 'wb') )
         
