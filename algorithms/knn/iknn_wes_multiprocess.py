@@ -11,9 +11,9 @@ import pandas as pd
 import pickle
 import os
 import time
-from math import log10, pow
-from collections import defaultdict
-
+from math import log10
+import multiprocess
+from multiprocess import Pool
 
 class ItemKNN:
     '''
@@ -61,92 +61,90 @@ class ItemKNN:
         self.folder = folder
         self.return_num_preds = return_num_preds
 
-        self.item_session_map = defaultdict(set)
-        self.session_item_map = defaultdict(set)
-        # self.session_time = dict()
 
-
-
-    def train(self, data, test=None):
+    def train(self, train, test=None):
+        '''
+        Trains the predictor.
         
-
-
-        train = data['actions']
-        test = test['actions']
-        test_items = set(test[self.item_key].unique())
+        Parameters
+        --------
+        data: pandas.DataFrame
+            Training data. It contains the transactions of the sessions. It has one column for session IDs, one for item IDs and one for the timestamp of the events (unix timestamps).
+            It must have a header. Column names are arbitrary, but must correspond to the ones you set during the initialization of the network (session_key, item_key, time_key properties).
+            
+        '''
+        
+        data = train['actions']
+        datat = test['actions']
+        test_items = set( datat[self.item_key].unique() )
+        
         folder = self.folder
-        itemids = train[self.item_key].unique()
         
-
         name = folder + 'iknn_sims.pkl'
         if self.alpha != 0.5:
             name += '.'+str(self.alpha)
         if self.lmbd != 20:
             name += '.'+str(self.lmbd)
-
-        if folder is not None and os.path.isfile( folder + 'item_session_map.pkl'):
-            self.session_item_map = pickle.load( open( folder + 'session_item_map.pkl', 'rb') )
-            self.session_time = pickle.load( open( folder + 'session_time.pkl', 'rb' ) )
-            self.item_session_map = pickle.load( open( folder + 'item_session_map.pkl', 'rb' ) )
+        
+        if 1 > 2:
+            pass
+        # if folder is not None and os.path.isfile( name ):
+        #     self.sims = pickle.load( open( name, 'rb') )
         else:
-            col_playlist = train.columns.get_loc(self.session_key)
-            col_track = train.columns.get_loc(self.item_key)
-
-        for row in train.itertuples(index = False):
-            self.item_session_map[row[col_track]].add(row[col_playlist])
-            self.session_item_map[row[col_playlist]].add(row[col_track])
-
-        playlists_list = self.session_item_map.values()
-
-
-        # def coexists_count(lst, item):
-        #     res = {}
-        #     for s in lst:
-        #         if item in s:
-        #             for key in s:
-        #                 if key != item:
-        #                     if key not in res:
-        #                         res[key] = 1
-        #                     else:
-        #                         res[key] += 1
-        #     return res
-
-
-        cnt = 0
-        tstart = time.time()
-        self.sims = dict()
-        print(len(self.item_session_map))
-        for itemi in self.item_session_map:
-
-            if itemids[itemi] not in test_items:
-                continue
+            data.set_index(np.arange(len(data)), inplace=True)
+            itemids = data[self.item_key].unique()
+            n_items = len(itemids) 
+            data = pd.merge(data, pd.DataFrame({self.item_key:itemids, 'ItemIdx':np.arange(len(itemids))}), on=self.item_key, how='inner')
+            sessionids = data[self.session_key].unique()
+            data = pd.merge(data, pd.DataFrame({self.session_key:sessionids, 'SessionIdx':np.arange(len(sessionids))}), on=self.session_key, how='inner')
+            supp = data.groupby('SessionIdx').size()
+            session_offsets = np.zeros(len(supp)+1, dtype=np.int32)
+            session_offsets[1:] = supp.cumsum()
+            index_by_sessions = data.sort_values(['SessionIdx', self.time_key]).index.values
+            supp = data.groupby('ItemIdx').size()
+            item_offsets = np.zeros(n_items+1, dtype=np.int32)
+            item_offsets[1:] = supp.cumsum()
+            index_by_items = data.sort_values(['ItemIdx', self.time_key]).index.values
+            self.sims = dict()
             
-            iarray_mapping = defaultdict(int)
-            n = len(self.item_session_map[itemi])
-            c = 0
-            for itemj in self.item_session_map:
-                c += 1
-                print(c)
-                intersection = self.item_session_map[itemi].intersection(self.item_session_map[itemj])
-                if itemi == itemj:
-                    iarray_mapping[itemj] = len(intersection)
-                    continue
-                m = len(self.item_session_map[itemj])
-                iarray_mapping[itemj] = len(intersection) / (pow((n + self.lmbd), self.alpha) * pow((m + self.lmbd), 1 - self.alpha))
-            list_keys = [[val, idx] for idx, val in enumerate(list(self.item_session_map.keys()))]
-            indices = [x[0] for x in sorted(list_keys, key = lambda x: iarray_mapping[x[1]], reverse = True)[:self.n_sims]]
-            filtered_dict = {k: v for k, v in iarray_mapping.items() if k in indices}
+            cnt = 0
+            tstart = time.time()
 
 
-            # dic_i = coexists_count(playlists_list, itemi)
-            # self.sims[itemids[itemi]] = pd.Series(dic_i)
-
+            def process_item(i):
+                if itemids[i] not in test_items:
+                    return None
+                    
+                iarray = np.zeros(n_items)
+                start = item_offsets[i]
+                end = item_offsets[i+1]
+                for e in index_by_items[start:end]:
+                    uidx = data.SessionIdx.values[e]
+                    ustart = session_offsets[uidx]
+                    uend = session_offsets[uidx+1]
+                    user_events = index_by_sessions[ustart:uend]
+                    iarray[data.ItemIdx.values[user_events]] += 1
+                iarray[i] = 0
+                norm = np.power((supp[i] + self.lmbd), self.alpha) * np.power((supp.values + self.lmbd), (1.0 - self.alpha))
+                norm[norm == 0] = 1
+                iarray = iarray / norm
+                indices = np.argsort(iarray)[-1:-1-self.n_sims:-1]
+                return (itemids[i], pd.Series(data=iarray[indices], index=itemids[indices]))
             
-
-            cnt += 1
-            if cnt % 1000 == 0:
-                print( ' -- finished {} of {} items in {}s'.format( cnt, len(test_items), (time.time() - tstart) ) )
-
+            with Pool(16) as p:
+                res = p.map(process_item, range(n_items))
+            print('before combine')
+            before_combine_t = time.time()
+            self.sims = {item[0]: item[1] for item in res if item}
+            print(time.time() - before_combine_t)
+            # return
+            # print(self.sims)
+                            
+                # cnt += 1
+                
+                # if cnt % 1000 == 0:
+                #     print( ' -- finished {} of {} items in {}s'.format( cnt, len(test_items), (time.time() - tstart) ) )
+                
             if folder is not None:
                 pickle.dump( self.sims, open( name, 'wb') )
         
