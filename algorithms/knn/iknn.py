@@ -1,66 +1,14 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Jun 26 11:57:27 2015
-@author: Balázs Hidasi
-Based on https://github.com/hidasib/GRU4Rec
-Extended to suit the framework
-"""
-
 import numpy as np
 import pandas as pd
 import pickle
 import os
 import time
 from math import log10
-from numba import jit
 
-# Add this Numba optimized function
-@jit(nopython=True)
-def calculate_iarray(item_offsets, index_by_items, data_SessionIdx_values, data_ItemIdx_values, session_offsets, index_by_sessions, n_items, i, itemids, test_items):
-    iarray = np.zeros(n_items)
-    if itemids[i] not in test_items:
-        return iarray
-
-    start = item_offsets[i]
-    end = item_offsets[i + 1]
-    for e in index_by_items[start:end]:
-        uidx = data_SessionIdx_values[e]
-        ustart = session_offsets[uidx]
-        uend = session_offsets[uidx + 1]
-        user_events = index_by_sessions[ustart:uend]
-        iarray[data_ItemIdx_values[user_events]] += 1
-
-    return iarray
 
 class ItemKNN:
-    '''
-    ItemKNN(n_sims = 100, lmbd = 20, alpha = 0.5, session_key = 'SessionId', item_key = 'ItemId', time_key = 'Time')
-    
-    Item-to-item predictor that computes the the similarity to all items to the given item.
-    
-    Similarity of two items is given by:
-    
-    .. math::
-        s_{i,j}=\sum_{s}I\{(s,i)\in D & (s,j)\in D\} / (supp_i+\\lambda)^{\\alpha}(supp_j+\\lambda)^{1-\\alpha}
-        
-    Parameters
-    --------
-    n_sims : int
-        Only give back non-zero scores to the N most similar items. Should be higher or equal than the cut-off of your evaluation. (Default value: 100)
-    lmbd : float
-        Regularization. Discounts the similarity of rare items (incidental co-occurrences). (Default value: 20)
-    alpha : float
-        Balance between normalizing with the supports of the two items. 0.5 gives cosine similarity, 1.0 gives confidence (as in association rules).
-    session_key : string
-        header of the session ID column in the input file (default: 'SessionId')
-    item_key : string
-        header of the item ID column in the input file (default: 'ItemId')
-    time_key : string
-        header of the timestamp column in the input file (default: 'Time')
-    
-    '''    
-    
-    def __init__(self, n_sims = 100, lmbd = 20, alpha = 0.5, steps=100, remind=False, weighting='same', idf_weight=None, pop_weight=None, session_key = 'playlist_id', item_key = 'track_id', time_key = 'pos', folder=None, return_num_preds=500 ):
+
+    def __init__(self, n_sims = 1500, lmbd = 20, alpha = 0.5, steps=100, remind=False, weighting='same', idf_weight=None, pop_weight=None, session_key = 'playlist_id', item_key = 'track_id', time_key = 'pos', folder=None, return_num_preds=500 ):
 
         self.n_sims = n_sims
         self.lmbd = lmbd
@@ -78,16 +26,6 @@ class ItemKNN:
 
 
     def train(self, train, test=None):
-        '''
-        Trains the predictor.
-        
-        Parameters
-        --------
-        data: pandas.DataFrame
-            Training data. It contains the transactions of the sessions. It has one column for session IDs, one for item IDs and one for the timestamp of the events (unix timestamps).
-            It must have a header. Column names are arbitrary, but must correspond to the ones you set during the initialization of the network (session_key, item_key, time_key properties).
-            
-        '''
         
         data = train['actions']
         datat = test['actions']
@@ -123,26 +61,32 @@ class ItemKNN:
             cnt = 0
             tstart = time.time()
             
-
-
             for i in range(n_items):
-
-            # Replaced the loop with the Numba optimized function
-                iarray = calculate_iarray(item_offsets, index_by_items, data.SessionIdx.values, data.ItemIdx.values,
-                                        session_offsets, index_by_sessions, n_items, i, itemids, test_items)
-
+                
+                if itemids[i] not in test_items:
+                    continue
+                
+                iarray = np.zeros(n_items)
+                start = item_offsets[i]
+                end = item_offsets[i+1]
+                for e in index_by_items[start:end]:
+                    uidx = data.SessionIdx.values[e]
+                    ustart = session_offsets[uidx]
+                    uend = session_offsets[uidx+1]
+                    user_events = index_by_sessions[ustart:uend]
+                    iarray[data.ItemIdx.values[user_events]] += 1
                 iarray[i] = 0
                 norm = np.power((supp[i] + self.lmbd), self.alpha) * np.power((supp.values + self.lmbd), (1.0 - self.alpha))
                 norm[norm == 0] = 1
                 iarray = iarray / norm
-                indices = np.argsort(iarray)[-1:-1 - self.n_sims:-1]
+                indices = np.argsort(iarray)[-1:-1-self.n_sims:-1]
                 self.sims[itemids[i]] = pd.Series(data=iarray[indices], index=itemids[indices])
-
+                
                 cnt += 1
-
-            if cnt % 1000 == 0:
-                    print(' -- finished {} of {} items in {}s'.format(cnt, len(test_items), (time.time() - tstart)))
-
+                
+                if cnt % 1000 == 0:
+                    print( ' -- finished {} of {} items in {}s'.format( cnt, len(test_items), (time.time() - tstart) ) )
+                
             if folder is not None:
                 pickle.dump( self.sims, open( name, 'wb') )
         
@@ -161,22 +105,6 @@ class ItemKNN:
         
             
     def predict( self, name=None, tracks=None, artists=None, playlist_id=None, num_hidden=None ):
-        '''
-        Gives predicton scores for a selected set of items on how likely they be the next item in the session.
-                
-        Parameters
-        --------
-        name : int or string
-            The session IDs of the event.
-        tracks : int list
-            The item ID of the event. Must be in the set of item IDs of the training set.
-            
-        Returns
-        --------
-        res : pandas.DataFrame
-            Prediction scores for selected items on how likely to be the next item of this session. Indexed by the item IDs.
-        
-        '''
         
         items = tracks if tracks is not None else []      
         
@@ -184,7 +112,6 @@ class ItemKNN:
         if len(items) > 0 and items[-1] in self.sims:
             sim_list = self.sims[items[-1]]
         
-        # Create things in the format
         res_dict = {}
         res_dict['track_id'] =  sim_list.index
         res_dict['confidence'] = sim_list
@@ -237,11 +164,7 @@ class ItemKNN:
         
         res.sort_values( 'confidence', ascending=False, inplace=True )
         
-        #if self.normalize:
-        #    res['confidence'] = res['confidence'] / res['confidence'].sum()
-        
-        res=res.head(self.return_num_preds) 
-        
+        res=res.head(self.return_num_preds)       
         return res
     
     
