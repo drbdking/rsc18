@@ -1,20 +1,19 @@
 """
 User-based k-NN collaborative filtering.
 """
-
-from sys import intern
-import logging
-
-import pandas as pd
-import numpy as np
-import time
-
-from numba import njit
-
-from lenskit import util
-from lenskit.data import sparse_ratings
-from lenskit.algorithms import Predictor
 from lenskit.util.accum import kvp_minheap_insert
+from lenskit.algorithms import Predictor
+from lenskit.data import sparse_ratings
+from lenskit import util
+from numba import njit
+import time
+import numpy as np
+import pandas as pd
+import logging
+from sys import intern
+import os
+os.environ["MKL_THREADING_LAYER"] = "tbb"
+
 
 _logger = logging.getLogger(__name__)
 
@@ -51,11 +50,12 @@ def _agg_sum(iur, item, sims, use):
     # added idf
     item_vec = iur.row(item)
     idf = np.log(item_vec.shape[0] / np.sum(item_vec))
-    
+
     x = 0.0
     for j in use:
         x += sims[j]
     return x * idf
+
 
 @njit
 def _score(items, results, iur, sims, nnbrs, min_sim, min_nbrs, agg):
@@ -100,7 +100,6 @@ def calculate_idf(iur):
     item_dim = iur.nrows
     helper_vector = np.ones(user_dim)
     return np.log(user_dim / iur.mult_vec(iur, helper_vector))
-
 
 
 class UserUser(Predictor):
@@ -192,9 +191,15 @@ class UserUser(Predictor):
         iur = uir.transpose()
 
         # L2-normalize ratings so dot product is cosine
-        if uir.values is None or not self.use_ratings:
-            uir.values = np.full(uir.nnz, 1.0)
-        uir.normalize_rows('unit')
+        # if uir.values is None or not self.use_ratings:
+        #     uir.values = np.full(uir.nnz, 1.0)
+        # uir.normalize_rows('unit')
+        start = time.time()
+        # IDF: np.matrix
+        self.idf = np.log(uir.nrows / iur.mult_vec(np.ones(uir.nrows)))
+
+        end = time.time()
+        print('IDF calculate time: ', end - start)
 
         self.rating_matrix_ = uir
         self.user_index_ = users
@@ -216,14 +221,15 @@ class UserUser(Predictor):
         Returns:
             pandas.Series: scores for the items, indexed by item id.
         """
-
         watch = util.Stopwatch()
         items = pd.Index(items, name='item')
 
         ratings, umean = self._get_user_data(user, ratings)
+
         if ratings is None:
             return pd.Series(index=items, dtype='float64')
-        assert len(ratings) == len(self.item_index_)  # ratings is a dense vector
+        # ratings is a dense vector
+        assert len(ratings) == len(self.item_index_)
 
         # now ratings is normalized to be a mean-centered unit vector
         # this means we can dot product to score neighbors
@@ -236,34 +242,46 @@ class UserUser(Predictor):
         if user in self.user_index_:
             nsims[self.user_index_.get_loc(user)] = 0
 
+        sim_index = np.argsort(-nsims)
+        neighbors = sim_index[:self.nnbrs]
+        nsims = nsims[:self.nnbrs]
+
         _logger.debug('computed user similarities')
         end = time.time()
         n_time = end - start
 
-        results = np.full(len(items), np.nan, dtype=np.float_)
-        ri_pos = self.item_index_.get_indexer(items.values)
-        if self.aggregate == self.AGG_WA:
-            agg = _agg_weighted_avg
-        elif self.aggregate == self.AGG_SUM:
-            # change here
-            agg = _agg_sum
-        else:
-            raise ValueError('invalid aggregate ' + self.aggregate)
+        # results = np.full(len(items), np.nan, dtype=np.float_)
+        # ri_pos = self.item_index_.get_indexer(items.values)
+        # if self.aggregate == self.AGG_WA:
+        #     agg = _agg_weighted_avg
+        # elif self.aggregate == self.AGG_SUM:
+        #     # change here
+        #     agg = _agg_sum
+        # else:
+        #     raise ValueError('invalid aggregate ' + self.aggregate)
 
+        # _score(ri_pos, results, self.transpose_matrix_, nsims,
+        #        self.nnbrs, self.min_sim, self.min_nbrs, agg)
+        
         start = time.time()
-        _score(ri_pos, results, self.transpose_matrix_, nsims,
-               self.nnbrs, self.min_sim, self.min_nbrs, agg)
+        neighbor_score_matrix = self.rating_matrix_.pick_rows(neighbors)
+        track_agg_cnt = neighbor_score_matrix.transpose().mult_vec(nsims)
+        track_score = track_agg_cnt * self.idf
+        candidates = np.argsort(-track_score)
+        scores = track_score[candidates]
         end = time.time()
         s_time = end - start
 
-        if self.aggregate in self.RATING_AGGS:
-            results += umean
+        res_dict = {'track_id': candidates, 'confidence': scores}
+        res = pd.DataFrame.from_dict(res_dict)
 
-        results = pd.Series(results, index=items, name='prediction')
+        # res.sort_values( ['confidence','track_id'], ascending=[False,True], inplace=True)
+        # res = res.reset_index(drop=True)
 
-        _logger.debug('scored %d of %d items for %s in %s',
-                      results.notna().sum(), len(items), user, watch)
-        return results, n_time, s_time
+        res = res.head(500)
+        # _logger.debug('scored %d of %d items for %s in %s',
+        #               results.notna().sum(), len(items), user, watch)
+        return res, n_time, s_time
 
     def _get_user_data(self, user, ratings):
         "Get a user's data for user-user CF"
@@ -273,9 +291,11 @@ class UserUser(Predictor):
             try:
                 upos = self.user_index_.get_loc(user)
                 ratings = rmat.row(upos)
-                umean = self.user_means_[upos] if self.user_means_ is not None else 0
+                umean = self.user_means_[
+                    upos] if self.user_means_ is not None else 0
             except KeyError:
-                _logger.warning('user %d has no ratings and none provided', user)
+                _logger.warning(
+                    'user %d has no ratings and none provided', user)
                 return None, 0
         else:
             _logger.debug('using provided ratings for user %d', user)

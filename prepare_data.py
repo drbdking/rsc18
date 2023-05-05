@@ -133,9 +133,8 @@ if __name__ == '__main__':
                     playlists_tracks['artist_id'].append( artist_id )
                     playlists_tracks['pos'].append( pos )
                     
-        
-        if (i%10==0):
-            print('done for', i, 'files from 1000')
+    
+    print('done for {} files'.format((i + 1) * 1000))
             
     df_playlists = pd.DataFrame.from_dict(playlists)
     df_tracks = pd.DataFrame.from_dict(tracks)

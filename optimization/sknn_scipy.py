@@ -117,13 +117,6 @@ class SessionKNN:
         end = time.time()
         print('Matrix build time: ', end - start)
 
-        self.item_pop = pd.DataFrame()
-        # num of sessions involving item
-        self.item_pop['pop'] = interactions.groupby(self.item_key).size()
-        # percentage
-        self.item_pop['pop'] = self.item_pop['pop'] / len(interactions)
-        self.item_pop = self.item_pop['pop'].to_dict()
-        
         start = time.time()
         # IDF: np.matrix
         if self.idf_weight != None:
@@ -141,7 +134,7 @@ class SessionKNN:
         self.tnorm = 0
         self.thead = 0
         self.count = 0
-                
+                 
     def predict( self, playlist, tracks, playlist_id=None, artists=None, num_hidden=None ):
         '''
         Gives predicton scores for a selected set of items on how likely they be the next item in the session.
@@ -175,20 +168,16 @@ class SessionKNN:
 
         start = time.time()
         candidates, scores = self.score_items(neighbors, similarity)
-        sim_sum = np.sum(similarity)
+
+        index = np.argsort(-scores)
+        candidates = candidates[index]
+        scores = scores[index]
 
         end = time.time()
         s_time = end - start
 
-        # Create things in the format
-        # if self.normalize:
-        #     scores = scores / sim_sum
-
         res_dict = {'track_id': candidates, 'confidence': scores}
         res = pd.DataFrame.from_dict(res_dict)       
-
-        res.sort_values( ['confidence','track_id'], ascending=[False,True], inplace=True )
-        res = res.reset_index(drop=True)
 
         res = res.head(self.return_num_preds)
                 
@@ -436,11 +425,6 @@ class SessionKNN:
         inverse_norm_playlist = 1 / norm(neighbor_playlists, axis=1).reshape(-1, 1)  
         similarity = (neighbor_playlists.dot(tracks_vector)).multiply(inverse_norm_playlist) / norm(tracks_vector)
         similarity = similarity.toarray().reshape(-1)
-
-        # for p in neighbor_playlists:
-        #     similarity.append(getattr(self, self.similarity)(p, tracks)) 
-
-        # similarity = np.array(similarity)
         indices = (similarity > threshold).nonzero()
         similarity = similarity[indices]
         possible_neighbors = possible_neighbors[indices]      
@@ -474,8 +458,7 @@ class SessionKNN:
         similarity = similarity[sort_index][:self.k]
 
         return possible_neighbors, similarity
-    
-            
+       
     def score_items(self, neighbors, similarity):
         '''
         Compute a set of scores for all items given a set of neighbors.

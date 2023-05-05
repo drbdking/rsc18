@@ -143,28 +143,13 @@ class SessionKNN:
                 
                 cnt += 1
                 
-                # if cnt % 100000 == 0:
-                #     print( ' -- finished {} of {} rows in {}s'.format( cnt, len(train), (time.time() - tstart) ) )
-                
-            # Add the last tuple    
+ 
             self.session_item_map.update({session : session_items})
             self.session_time.update({session : timestamp})
             
-            if folder is not None:
-                pickle.dump( self.session_item_map,  open( folder + 'session_item_map.pkl', 'wb' ) )
-                pickle.dump( self.session_time, open( folder + 'session_time.pkl', 'wb' ) )
-                pickle.dump( self.item_session_map, open( folder + 'item_session_map.pkl', 'wb' ) )
         end = time.time()
         print('Mapping build time: ', end - start)
 
-        self.item_pop = pd.DataFrame()
-        # num of sessions involving item
-        self.item_pop['pop'] = train.groupby( self.item_key ).size()
-        #self.item_pop['pop'] = self.item_pop['pop'] / self.item_pop['pop'].max()
-        # percentage
-        self.item_pop['pop'] = self.item_pop['pop'] / len( train )
-        self.item_pop = self.item_pop['pop'].to_dict()
-        
         start = time.time()
         # IDF
         if self.idf_weight != None:
@@ -174,22 +159,6 @@ class SessionKNN:
             self.idf = self.idf['idf'].to_dict()
         end  = time.time()
         print('IDF calculate time: ', end - start)
-        
-        
-        # ?
-        if self.title_boost > 0:
-            self.stemmer = stem.PorterStemmer()
-            playlists['name'] = playlists['name'].apply(lambda x: self.normalise(str(x), True, True ))
-            playlists['name_id'] = playlists['name'].astype( 'category' ).cat.codes
-            # is this efficient?
-            self.namemap = playlists.groupby('name').name_id.min()
-            self.namemap = pd.Series( index=self.namemap.index, data=self.namemap.values )
-            self.plnamemap = pd.Series( index=playlists['playlist_id'].values, data=playlists['name_id'].values )
-            
-        self.artist_map = pd.DataFrame()
-        # is this efficient?
-        self.artist_map['artist_id'] = train.groupby( self.item_key ).artist_id.min()
-        self.artist_map = self.artist_map['artist_id'].to_dict()
                 
         self.tall = 0
         self.tneighbors = 0
@@ -237,83 +206,28 @@ class SessionKNN:
         neighbors = self.find_neighbors( iset, plname )
         end = time.time()
         n_time = end - start
-        # print('Find neighbor time: ', n_time)
         self.tneighbors += (time.time() - tstart)
         
-        tstart = time.time()
+
         start = time.time()
         scores, simsum, count = self.score_items( neighbors, items, iset )
-        end = time.time()
-        s_time = end - start
-        # print('Score items time: ', s_time)
-        self.tscore += (time.time() - tstart)
-        
-        #push popular ones
-        if self.pop_boost > 0:
-                
-            for key in scores:
-                item_pop = self.item_pop[key]
-                # Gives some minimal MRR boost?
-                scores.update({key : (scores[key] + ( self.pop_boost * item_pop) )})
-        
-        tstart = time.time()
-        
-        if self.artist_boost > 0 and artists is not None:
-            
-            y = np.bincount(artists)
-            ii = np.nonzero(y)[0]
-            freq = pd.Series( index=ii, data=y[ii] )
-            
-#             res['artist_id'] = res.track_id.map( lambda t : self.artist_map[t] )
-#             res = res.merge( freq.to_frame('tmp'), how="left", left_on='artist_id', right_index=True )
-#             res['confidence'] += res['tmp'].fillna(0) * self.artist_boost
-#             del res['tmp']
-            
-            for key in scores:
-                if self.artist_map[key] in freq.index:
-                    factor = freq[self.artist_map[key]] / len(freq)
-                else:
-                    factor = 0
-                      
-                scores.update({key : (scores[key] + ( scores[key] * self.artist_boost * factor) )})
-                
-        self.tartist += (time.time() - tstart)
-        
-        tstart = time.time()
+
         # Create things in the format
         res_dict = {}
         res_dict['track_id'] = [x for x in scores]
         res_dict['confidence'] = [scores[x] for x in scores]
-        if self.neighbor_decay > 0:
-            res_dict['count'] = [count[x] for x in scores]
-        res = pd.DataFrame.from_dict(res_dict)
-        if self.neighbor_decay > 0:
-            res['count'] = ( res['count'] - res['count'].min() ) / ( res['count'].max() - res['count'].min() )
-            res['confidence'] = res['confidence'] - ( res['confidence'] * res['count'] * self.neighbor_decay)
-        self.tformat += (time.time() - tstart)
-             
-        tstart = time.time()
-        # if self.normalize:
-        #     res['confidence'] = res['confidence'] / simsum
-            #res['confidence'] = ( res['confidence']  - res['confidence'].min() )/ ( res['confidence'].max() - res['confidence'].min() )
-        self.tnorm += (time.time() - tstart)
         
-        tstart = time.time()
+        res = pd.DataFrame.from_dict(res_dict)
+
+
         res.sort_values( ['confidence','track_id'], ascending=[False,True], inplace=True )
         res = res.reset_index(drop=True)
-        self.tsort += (time.time() - tstart)
+        end = time.time()
+        s_time = end - start
 
-        tstart = time.time()
         res = res.head(self.return_num_preds)
-        self.thead += (time.time() - tstart)
-        
-        self.tall += (time.time() - tstartall)
-        
+
         self.count += 1
-        
-        #rlist = [ (self.tall / self.count), (self.tneighbors / self.count), (self.tscore / self.count), (self.tartist / self.count), (self.tsort / self.count), (self.tnorm / self.count) ]
-        #print( ','.join( map( str, rlist ) ) )
-                
         return res, n_time, s_time
 
 
@@ -619,32 +533,19 @@ class SessionKNN:
                     step += 1
             
             for item in items:
-                
-                # if not self.remind and item in iset:
-                #     continue
 
                 # caching previous result for addition
                 old_score = scores.get( item )
                 # similarity
                 new_score = session[1]
-                
-                # if old_score is None:
-                #     new_score = new_score if not self.idf_weight else new_score + ( new_score * self.idf[item] * self.idf_weight )
-                #     new_score = new_score if not self.pop_weight else new_score / self.item_pop[item]
-                #     new_score = new_score if self.seq_weighting is None else new_score * decay
-                # else: 
-                #     new_score = new_score if not self.idf_weight else new_score + ( new_score * self.idf[item] * self.idf_weight )
-                #     new_score = new_score if not self.pop_weight else new_score / self.item_pop[item]
-                #     new_score = new_score if self.seq_weighting is None else new_score * decay
-                #     new_score = old_score + new_score
 
                 if old_score is None:
                     new_score = new_score if not self.idf_weight else new_score * self.idf[item] * self.idf_weight
-                    new_score = new_score if not self.pop_weight else new_score / self.item_pop[item]
+                    # new_score = new_score if not self.pop_weight else new_score / self.item_pop[item]
                     new_score = new_score if self.seq_weighting is None else new_score * decay
                 else: 
                     new_score = new_score if not self.idf_weight else new_score * self.idf[item] * self.idf_weight
-                    new_score = new_score if not self.pop_weight else new_score / self.item_pop[item]
+                    # new_score = new_score if not self.pop_weight else new_score / self.item_pop[item]
                     new_score = new_score if self.seq_weighting is None else new_score * decay
                     new_score = old_score + new_score
                     
