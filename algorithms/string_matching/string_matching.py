@@ -16,6 +16,8 @@ from nltk.corpus import wordnet as wn
 from fuzzywuzzy import fuzz
 from unittest.mock import inplace
 import re
+import concurrent.futures
+import collections
 
 class StringMatching(object):
     '''
@@ -49,6 +51,10 @@ class StringMatching(object):
         
     def init(self, train, test):
         pass
+
+    def normalize_wrapper(self, name):
+        return self.normalize(str(name), self.tokenize, self.stemm, self.clean)
+
     
     def train(self, train, test=None):
         
@@ -72,7 +78,36 @@ class StringMatching(object):
             new_lists['name'] = new_lists['artist_name']
             del new_lists['artist_name']
             self.playlists = pd.concat( [ self.playlists, new_lists ] )
-        
+        '''
+        if self.add_artists:
+            # Calculate 'count' using groupby and size, and reset_index with proper column names
+            new_actions = (
+                self.actions.groupby(['artist_id', 'track_id'])
+                .size()
+                .reset_index(name='count')
+                )
+
+            # Calculate 'playlist_id' and assign it to the DataFrame directly
+            max_pl = self.playlists.playlist_id.max()
+            new_actions['playlist_id'] = max_pl + new_actions['artist_id']
+
+            # Concatenate the new_actions DataFrame to the existing self.actions DataFrame
+            self.actions = pd.concat([self.actions, new_actions])
+
+            # Create the new_lists DataFrame and merge with train['artists'] in one step
+            new_lists = (
+                new_actions.groupby(['playlist_id'])
+                .agg({'artist_id': 'min'})
+                .reset_index()
+                .merge(train['artists'][['artist_id', 'artist_name']], on='artist_id', how='inner')
+                )
+
+            # Rename the 'artist_name' column to 'name'
+            new_lists.rename(columns={'artist_name': 'name'}, inplace=True)
+
+            # Concatenate the new_lists DataFrame to the existing self.playlists DataFrame
+            self.playlists = pd.concat([self.playlists, new_lists])
+        '''
         if self.add_albums:
             train['tracks']['album_id'] = train['tracks']['album_uri'].astype('category').cat.codes
             self.actions = self.actions.merge( train['tracks'][['track_id','album_id']], on='track_id', how='inner' )
@@ -90,12 +125,25 @@ class StringMatching(object):
             new_lists['name'] = new_lists['album_name']
             del new_lists['album_name']
             self.playlists = pd.concat( [ self.playlists, new_lists ] )
-                
-        #normalize playlist names
+        
+        ''''
+        #normalize playlist names, this is OG code that has been replaced
         self.playlists['name'] = self.playlists['name'].apply(lambda x: self.normalize(str(x), self.tokenize, self.stemm, self.clean))        
         self.playlists['name_id'] = self.playlists['name'].astype( 'category' ).cat.codes
         self.playlists['count'] = self.playlists.groupby( ['name_id'] ).name_id.transform( 'count' )
+        '''
+
+
+        #modificaitons for efficiency
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            self.playlists['name'] = list(executor.map(self.normalize_wrapper, self.playlists['name']))
+        self.playlists['name_id'] = self.playlists['name'].astype( 'category' ).cat.codes
+        self.playlists['count'] = self.playlists.groupby( ['name_id'] ).name_id.transform( 'count' )
+
+
         
+
+
         self.nameidmap = pd.Series( index=self.playlists['name'], data=self.playlists['name_id'].values )
         self.nameidmap.drop_duplicates(inplace=True)
         
@@ -104,7 +152,21 @@ class StringMatching(object):
         self.actions['tmp'] = range(len(self.actions))
         
         del self.actions['tmp']
-        
+
+
+        '''
+        self.nameidmap = self.playlists[['name', 'name_id']].drop_duplicates().set_index('name')['name_id']
+
+        # Merge self.actions with self.playlists on 'playlist_id' while only selecting the necessary columns
+        self.actions = self.actions.merge(
+            self.playlists[['playlist_id', 'name_id']], on='playlist_id', how='inner'
+        )
+
+        # Sort self.actions by 'name_id', 'playlist_id', and 'pos'
+        self.actions.sort_values(['name_id', 'playlist_id', 'pos'], inplace=True)
+        '''
+
+        #OG code
         pop = pd.DataFrame()
         pop['popularity'] = train['actions'].groupby( 'track_id' ).size()
         pop.reset_index(inplace=True)
@@ -113,11 +175,34 @@ class StringMatching(object):
         self.pop = pop[['track_id','confidence']]
         
         self.pop.index = self.pop['track_id']
+        '''
+        #Modified Code
+        # Count the occurrences of each track_id
+        track_id_counts = collections.Counter(train['actions']['track_id'])
+
+        # Calculate the confidence for each track_id
+        total_actions = len(train['actions'])
+        confidence_dict = {track_id: count / total_actions for track_id, count in track_id_counts.items()}
+
+        # Sort by confidence and track_id
+        sorted_confidence = sorted(confidence_dict.items(), key=lambda x: (-x[1], x[0]))
+
+        # Convert the sorted list into a dictionary and store it in self.pop
+        self.pop = dict(sorted_confidence)
+
+        self.pop = pd.DataFrame(sorted_confidence, columns=['track_id', 'confidence']).set_index('track_id')
+        '''
         
+
         self.not_enough = 0
         
         print( ' -- finished training in {}s'.format( (time.time() - tstart) ) )
         
+    
+    def normalize_name(x, tokenize, stemm, clean):
+        return StringMatching.normalize(str(x), tokenize, stemm, clean)
+
+    
     def predict(self, name=None, tracks=None, artists=None, playlist_id=None, num_hidden=None):
         
         res = pd.DataFrame()
@@ -164,7 +249,7 @@ class StringMatching(object):
             name_id = self.nameidmap[name]
                         
             #actions_for_name = self.actions.ix[start:end]
-            actions_for_name = self.actions.ix[ self.actions.name_id == name_id ]
+            actions_for_name = self.actions.loc[ self.actions.name_id == name_id ]
              
             res['confidence'] = actions_for_name.groupby( 'track_id' ).size()
             res.reset_index(inplace=True)
